@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>식물 관찰 앱</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://apis.google.com/js/api.js"></script>
+</head>
+<body class="bg-green-50">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold text-green-800 mb-8">식물 관찰 앱</h1>
+        
+        <form id="observationForm" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="plantName">
+                    식물 이름
+                </label>
+                <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" id="plantName" type="text" placeholder="식물 이름" required>
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="observationDate">
+                    관찰 날짜
+                </label>
+                <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" id="observationDate" type="date" required>
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="notes">
+                    관찰 내용
+                </label>
+                <textarea class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" id="notes" placeholder="관찰 내용을 입력하세요" rows="3"></textarea>
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="camera">
+                    사진 촬영
+                </label>
+                <button id="cameraButton" type="button" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                    카메라 열기
+                </button>
+                <video id="video" class="mt-2 w-full" style="display:none"></video>
+                <canvas id="canvas" style="display:none"></canvas>
+                <img id="photo" class="mt-2 w-full" style="display:none">
+            </div>
+            <div class="flex items-center justify-between">
+                <button class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
+                    관찰 기록
+                </button>
+            </div>
+        </form>
+
+        <div id="observationList" class="bg-white shadow-md rounded px-8 pt-6 pb-8">
+            <h2 class="text-2xl font-bold text-green-800 mb-4">관찰 목록</h2>
+            <ul id="observations" class="divide-y divide-gray-200"></ul>
+        </div>
+    </div>
+
+    <script>
+        // 구글 시트 API 설정
+        const SPREADSHEET_ID = '1G7ACFQZLZXQxF_dYntFTad7QJ_uspeZ8S7p3zzPB1X0/edit?gid=0#gid=0';
+        const RANGE = 'Sheet1!A:E';  // E열 추가 (이미지용)
+        const CLIENT_ID = 'tngkraos';
+        const API_KEY = 'AIzaSyAK0lMl050AzcycXRLMa68R5PxAMRq8Zfw';
+        const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
+
+        let capturedImage = null;
+
+        function initClient() {
+            gapi.client.init({
+                apiKey: API_KEY,
+                clientId: CLIENT_ID,
+                scope: SCOPES
+            }).then(function () {
+                gapi.auth2.getAuthInstance().isSignedIn.listen(updateSigninStatus);
+                updateSigninStatus(gapi.auth2.getAuthInstance().isSignedIn.get());
+            }, function(error) {
+                console.error('Error initializing Google API client', error);
+            });
+        }
+
+        function updateSigninStatus(isSignedIn) {
+            if (isSignedIn) {
+                loadObservations();
+            } else {
+                gapi.auth2.getAuthInstance().signIn();
+            }
+        }
+
+        function handleClientLoad() {
+            gapi.load('client:auth2', initClient);
+        }
+
+        document.getElementById('observationForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const plantName = document.getElementById('plantName').value;
+            const observationDate = document.getElementById('observationDate').value;
+            const notes = document.getElementById('notes').value;
+
+            gapi.client.sheets.spreadsheets.values.append({
+                spreadsheetId: SPREADSHEET_ID,
+                range: RANGE,
+                valueInputOption: 'USER_ENTERED',
+                resource: {
+                    values: [[plantName, observationDate, notes, new Date().toISOString(), capturedImage]]
+                }
+            }).then(function(response) {
+                console.log('Observation added', response);
+                document.getElementById('observationForm').reset();
+                document.getElementById('photo').style.display = 'none';
+                capturedImage = null;
+                loadObservations();
+            }, function(response) {
+                console.error('Error adding observation', response);
+            });
+        });
+
+        function loadObservations() {
+            gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: SPREADSHEET_ID,
+                range: RANGE,
+            }).then(function(response) {
+                const range = response.result;
+                if (range.values.length > 0) {
+                    const list = document.getElementById('observations');
+                    list.innerHTML = '';
+                    range.values.reverse().forEach(function(row) {
+                        const li = document.createElement('li');
+                        li.className = 'py-4';
+                        li.innerHTML = `
+                            <div class="flex space-x-3">
+                                <div class="flex-1 space-y-1">
+                                    <div class="flex items-center justify-between">
+                                        <h3 class="text-sm font-medium">${row[0]}</h3>
+                                        <p class="text-sm text-gray-500">${row[1]}</p>
+                                    </div>
+                                    <p class="text-sm text-gray-500">${row[2]}</p>
+                                    ${row[4] ? `<img src="${row[4]}" class="mt-2 w-full">` : ''}
+                                </div>
+                            </div>
+                        `;
+                        list.appendChild(li);
+                    });
+                } else {
+                    console.log('No data found.');
+                }
+            }, function(response) {
+                console.error('Error loading observations', response);
+            });
+        }
+
+        // 카메라 기능
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const photo = document.getElementById('photo');
+        const cameraButton = document.getElementById('cameraButton');
+
+        cameraButton.addEventListener('click', function() {
+            if (video.style.display === 'none') {
+                startCamera();
+            } else {
+                capturePhoto();
+            }
+        });
+
+        function startCamera() {
+            navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+                .then(function(stream) {
+                    video.srcObject = stream;
+                    video.play();
+                    video.style.display = 'block';
+                    cameraButton.textContent = '사진 촬영';
+                })
+                .catch(function(err) {
+                    console.error("카메라 접근 에러: ", err);
+                });
+        }
+
+        function capturePhoto() {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            capturedImage = canvas.toDataURL('image/jpeg');
+            photo.src = capturedImage;
+            photo.style.display = 'block';
+            video.style.display = 'none';
+            cameraButton.textContent = '다시 촬영';
+
+            // 카메라 스트림 중지
+            video.srcObject.getTracks().forEach(track => track.stop());
+        }
+    </script>
+    <script async defer src="https://apis.google.com/js/api.js" onload="handleClientLoad()"></script>
+</body>
+</html>
